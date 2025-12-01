@@ -35,7 +35,21 @@ class BoolAttribute:
         duration_threshold: Duration (in seconds) a value must be reported before it can change.
         buffer_mode: The mode determining when buffering is applied.
     """
-    
+    __slots__ = (
+        "_name",
+        "_value",
+        "_count_threshold",
+        "_duration_threshold",
+        "_buffer_mode",
+        "_count_threshold_true_to_false",
+        "_count_threshold_false_to_true",
+        "_duration_threshold_true_to_false",
+        "_duration_threshold_false_to_true",
+        "_pending_value",
+        "_pending_count",
+        "_pending_start_time",
+    )
+
     def __init__(
         self,
         name: str,

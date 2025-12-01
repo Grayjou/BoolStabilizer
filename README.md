@@ -52,7 +52,7 @@ print(stabilizer.get_value("sensor1"))
 
 ## Asymmetric Thresholds
 
-Starting in vX.X.X, BoolStabilizer supports asymmetric stabilization:
+BoolStabilizer supports asymmetric stabilization:
 you can specify different thresholds for **true→false** and **false→true** transitions.
 
 If a per-direction threshold is not provided, it falls back to the base

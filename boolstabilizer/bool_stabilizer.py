@@ -22,6 +22,17 @@ class BoolStabilizer:
         duration_threshold_true_to_false: Default duration threshold for true→false transitions.
         duration_threshold_false_to_true: Default duration threshold for false→true transitions.
     """
+
+    __slots__ = (
+        "_count_threshold",
+        "_duration_threshold",
+        "_buffer_mode",
+        "_count_threshold_true_to_false",
+        "_count_threshold_false_to_true",
+        "_duration_threshold_true_to_false",
+        "_duration_threshold_false_to_true",
+        "_attributes",
+    )
     
     def __init__(
         self,
