@@ -42,7 +42,12 @@ class BoolAttribute:
         initial_value: bool = False,
         count_threshold: int = 1,
         duration_threshold: float = 0.0,
-        buffer_mode: BufferMode = BufferMode.BOTH
+        buffer_mode: BufferMode = BufferMode.BOTH,
+        *,
+        count_threshold_true_to_false: Optional[int] = None,
+        count_threshold_false_to_true: Optional[int] = None,
+        duration_threshold_true_to_false: Optional[float] = None,
+        duration_threshold_false_to_true: Optional[float] = None,
     ):
         """
         Initialize a BoolAttribute.
@@ -70,6 +75,11 @@ class BoolAttribute:
         self._duration_threshold = duration_threshold
         self._buffer_mode = buffer_mode
         
+        self._count_threshold_true_to_false = count_threshold_true_to_false
+        self._count_threshold_false_to_true = count_threshold_false_to_true
+        self._duration_threshold_true_to_false = duration_threshold_true_to_false
+        self._duration_threshold_false_to_true = duration_threshold_false_to_true
+
         # Tracking state for pending value changes
         self._pending_value: Optional[bool] = None
         self._pending_count: int = 0
@@ -88,16 +98,25 @@ class BoolAttribute:
     @property
     def count_threshold(self) -> int:
         """Get the count threshold."""
+        false_to_true = self._count_threshold_false_to_true if self._count_threshold_false_to_true is not None else self._count_threshold
+        true_to_false = self._count_threshold_true_to_false if self._count_threshold_true_to_false is not None else self._count_threshold
+        if true_to_false != false_to_true:
+            raise ValueError("Count thresholds differ for true→false and false→true transitions")
         return self._count_threshold
     
     @property
     def duration_threshold(self) -> float:
         """Get the duration threshold in seconds."""
+        false_to_true = self._duration_threshold_false_to_true if self._duration_threshold_false_to_true is not None else self._duration_threshold
+        true_to_false = self._duration_threshold_true_to_false if self._duration_threshold_true_to_false is not None else self._duration_threshold
+        if true_to_false != false_to_true:
+            raise ValueError("Duration thresholds differ for true→false and false→true transitions")
         return self._duration_threshold
     
     @property
     def buffer_mode(self) -> BufferMode:
         """Get the current buffer mode."""
+
         return self._buffer_mode
     
     @buffer_mode.setter
