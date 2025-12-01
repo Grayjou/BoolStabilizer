@@ -1,7 +1,23 @@
 """BoolAttribute class for tracking stabilized boolean values."""
 
 import time
+from enum import Enum, auto
 from typing import Optional
+
+
+class BufferMode(Enum):
+    """
+    Enum defining when to apply buffering/stabilization.
+    
+    BOTH: Apply buffering for both true→false and false→true transitions.
+    TRUE_TO_FALSE: Only apply buffering when transitioning from True to False.
+    FALSE_TO_TRUE: Only apply buffering when transitioning from False to True.
+    NONE: No buffering - all changes are immediate.
+    """
+    BOTH = auto()
+    TRUE_TO_FALSE = auto()
+    FALSE_TO_TRUE = auto()
+    NONE = auto()
 
 
 class BoolAttribute:
@@ -17,6 +33,7 @@ class BoolAttribute:
         value: The current stabilized boolean value.
         count_threshold: Number of times a value must be reported before it can change.
         duration_threshold: Duration (in seconds) a value must be reported before it can change.
+        buffer_mode: The mode determining when buffering is applied.
     """
     
     def __init__(
@@ -24,7 +41,8 @@ class BoolAttribute:
         name: str,
         initial_value: bool = False,
         count_threshold: int = 1,
-        duration_threshold: float = 0.0
+        duration_threshold: float = 0.0,
+        buffer_mode: BufferMode = BufferMode.BOTH
     ):
         """
         Initialize a BoolAttribute.
@@ -36,6 +54,7 @@ class BoolAttribute:
                             Must be at least 1. Defaults to 1.
             duration_threshold: Duration in seconds the value must be consistently
                                reported before changing. Defaults to 0.0.
+            buffer_mode: When to apply buffering. Defaults to BufferMode.BOTH.
         
         Raises:
             ValueError: If count_threshold is less than 1 or duration_threshold is negative.
@@ -49,6 +68,7 @@ class BoolAttribute:
         self._value = initial_value
         self._count_threshold = count_threshold
         self._duration_threshold = duration_threshold
+        self._buffer_mode = buffer_mode
         
         # Tracking state for pending value changes
         self._pending_value: Optional[bool] = None
@@ -76,6 +96,16 @@ class BoolAttribute:
         return self._duration_threshold
     
     @property
+    def buffer_mode(self) -> BufferMode:
+        """Get the current buffer mode."""
+        return self._buffer_mode
+    
+    @buffer_mode.setter
+    def buffer_mode(self, mode: BufferMode) -> None:
+        """Set the buffer mode."""
+        self._buffer_mode = mode
+    
+    @property
     def pending_count(self) -> int:
         """Get the current count of pending value reports."""
         return self._pending_count
@@ -92,21 +122,25 @@ class BoolAttribute:
         """Get the pending value, if any."""
         return self._pending_value
     
-    def report(self, new_value: bool, apply_buffer: bool = True) -> bool:
+    def report(self, new_value: bool) -> bool:
         """
         Report a new value for this attribute.
         
-        If apply_buffer is True, the value will only change when thresholds are met.
-        If apply_buffer is False, the value changes immediately.
+        The buffering behavior depends on the buffer_mode setting:
+        - BOTH: Always apply buffering
+        - TRUE_TO_FALSE: Only buffer when transitioning from True to False
+        - FALSE_TO_TRUE: Only buffer when transitioning from False to True
+        - NONE: Never buffer (immediate changes)
         
         Args:
             new_value: The new boolean value being reported.
-            apply_buffer: Whether to apply the buffering/stabilization logic.
-                         If False, the value changes immediately.
         
         Returns:
             The current stabilized value after processing the report.
         """
+        # Determine if buffering should be applied for this transition
+        apply_buffer = self._should_apply_buffer(new_value)
+        
         if not apply_buffer:
             # Bypass buffering - change immediately
             self._value = new_value
@@ -134,6 +168,32 @@ class BoolAttribute:
             self._reset_pending()
         
         return self._value
+    
+    def _should_apply_buffer(self, new_value: bool) -> bool:
+        """
+        Determine if buffering should be applied for a transition.
+        
+        Args:
+            new_value: The new value being reported.
+        
+        Returns:
+            True if buffering should be applied, False otherwise.
+        """
+        if self._buffer_mode == BufferMode.NONE:
+            return False
+        
+        if self._buffer_mode == BufferMode.BOTH:
+            return True
+        
+        if self._buffer_mode == BufferMode.TRUE_TO_FALSE:
+            # Only buffer when going from True to False
+            return self._value and not new_value
+        
+        if self._buffer_mode == BufferMode.FALSE_TO_TRUE:
+            # Only buffer when going from False to True
+            return not self._value and new_value
+        
+        return True
     
     def _check_thresholds(self) -> bool:
         """Check if both count and duration thresholds are met."""
@@ -164,5 +224,6 @@ class BoolAttribute:
         return (
             f"BoolAttribute(name={self._name!r}, value={self._value}, "
             f"count_threshold={self._count_threshold}, "
-            f"duration_threshold={self._duration_threshold})"
+            f"duration_threshold={self._duration_threshold}, "
+            f"buffer_mode={self._buffer_mode})"
         )

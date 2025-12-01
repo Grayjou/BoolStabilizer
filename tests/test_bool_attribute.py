@@ -3,7 +3,7 @@
 import time
 import unittest
 
-from boolstabilizer import BoolAttribute
+from boolstabilizer import BoolAttribute, BufferMode
 
 
 class TestBoolAttributeInit(unittest.TestCase):
@@ -16,14 +16,22 @@ class TestBoolAttributeInit(unittest.TestCase):
         self.assertFalse(attr.value)
         self.assertEqual(attr.count_threshold, 1)
         self.assertEqual(attr.duration_threshold, 0.0)
+        self.assertEqual(attr.buffer_mode, BufferMode.BOTH)
     
     def test_custom_initialization(self):
         """Test custom initialization values."""
-        attr = BoolAttribute("custom", initial_value=True, count_threshold=5, duration_threshold=2.0)
+        attr = BoolAttribute(
+            "custom",
+            initial_value=True,
+            count_threshold=5,
+            duration_threshold=2.0,
+            buffer_mode=BufferMode.TRUE_TO_FALSE
+        )
         self.assertEqual(attr.name, "custom")
         self.assertTrue(attr.value)
         self.assertEqual(attr.count_threshold, 5)
         self.assertEqual(attr.duration_threshold, 2.0)
+        self.assertEqual(attr.buffer_mode, BufferMode.TRUE_TO_FALSE)
     
     def test_invalid_count_threshold(self):
         """Test that invalid count_threshold raises ValueError."""
@@ -88,13 +96,78 @@ class TestBoolAttributeReport(unittest.TestCase):
         attr.report(False)
         self.assertEqual(attr.pending_count, 0)
         self.assertIsNone(attr.pending_value)
+
+
+class TestBoolAttributeBufferMode(unittest.TestCase):
+    """Test BoolAttribute buffer mode functionality."""
     
-    def test_report_without_buffer(self):
-        """Test reporting without buffer changes immediately."""
-        attr = BoolAttribute("test", initial_value=False, count_threshold=10)
-        result = attr.report(True, apply_buffer=False)
+    def test_buffer_mode_both(self):
+        """Test BufferMode.BOTH applies buffering in both directions."""
+        attr = BoolAttribute("test", initial_value=False, count_threshold=3, buffer_mode=BufferMode.BOTH)
+        
+        # False to True - should be buffered
+        attr.report(True)
+        attr.report(True)
+        self.assertFalse(attr.value)  # Not changed yet
+        attr.report(True)
+        self.assertTrue(attr.value)  # Changed after 3 reports
+        
+        # True to False - should also be buffered
+        attr.report(False)
+        attr.report(False)
+        self.assertTrue(attr.value)  # Not changed yet
+        attr.report(False)
+        self.assertFalse(attr.value)  # Changed after 3 reports
+    
+    def test_buffer_mode_true_to_false(self):
+        """Test BufferMode.TRUE_TO_FALSE only buffers true→false transitions."""
+        attr = BoolAttribute("test", initial_value=False, count_threshold=3, buffer_mode=BufferMode.TRUE_TO_FALSE)
+        
+        # False to True - should NOT be buffered (immediate change)
+        result = attr.report(True)
+        self.assertTrue(result)  # Changed immediately
+        
+        # True to False - should be buffered
+        attr.report(False)
+        attr.report(False)
+        self.assertTrue(attr.value)  # Not changed yet
+        attr.report(False)
+        self.assertFalse(attr.value)  # Changed after 3 reports
+    
+    def test_buffer_mode_false_to_true(self):
+        """Test BufferMode.FALSE_TO_TRUE only buffers false→true transitions."""
+        attr = BoolAttribute("test", initial_value=True, count_threshold=3, buffer_mode=BufferMode.FALSE_TO_TRUE)
+        
+        # True to False - should NOT be buffered (immediate change)
+        result = attr.report(False)
+        self.assertFalse(result)  # Changed immediately
+        
+        # False to True - should be buffered
+        attr.report(True)
+        attr.report(True)
+        self.assertFalse(attr.value)  # Not changed yet
+        attr.report(True)
+        self.assertTrue(attr.value)  # Changed after 3 reports
+    
+    def test_buffer_mode_none(self):
+        """Test BufferMode.NONE never applies buffering."""
+        attr = BoolAttribute("test", initial_value=False, count_threshold=3, buffer_mode=BufferMode.NONE)
+        
+        # False to True - immediate change
+        result = attr.report(True)
         self.assertTrue(result)
-        self.assertTrue(attr.value)
+        
+        # True to False - immediate change
+        result = attr.report(False)
+        self.assertFalse(result)
+    
+    def test_buffer_mode_setter(self):
+        """Test setting buffer_mode after initialization."""
+        attr = BoolAttribute("test", buffer_mode=BufferMode.BOTH)
+        self.assertEqual(attr.buffer_mode, BufferMode.BOTH)
+        
+        attr.buffer_mode = BufferMode.NONE
+        self.assertEqual(attr.buffer_mode, BufferMode.NONE)
 
 
 class TestBoolAttributeDurationThreshold(unittest.TestCase):
@@ -158,6 +231,7 @@ class TestBoolAttributeRepr(unittest.TestCase):
         self.assertIn("True", repr_str)
         self.assertIn("3", repr_str)
         self.assertIn("1.5", repr_str)
+        self.assertIn("buffer_mode", repr_str)
 
 
 if __name__ == "__main__":

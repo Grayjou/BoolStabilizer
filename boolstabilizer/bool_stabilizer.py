@@ -1,24 +1,8 @@
 """BoolStabilizer class for managing multiple BoolAttributes."""
 
-from enum import Enum, auto
 from typing import Dict, Iterator, Optional
 
-from .bool_attribute import BoolAttribute
-
-
-class BufferMode(Enum):
-    """
-    Enum defining when to apply buffering/stabilization.
-    
-    BOTH: Apply buffering for both true→false and false→true transitions.
-    TRUE_TO_FALSE: Only apply buffering when transitioning from True to False.
-    FALSE_TO_TRUE: Only apply buffering when transitioning from False to True.
-    NONE: No buffering - all changes are immediate.
-    """
-    BOTH = auto()
-    TRUE_TO_FALSE = auto()
-    FALSE_TO_TRUE = auto()
-    NONE = auto()
+from .bool_attribute import BoolAttribute, BufferMode
 
 
 class BoolStabilizer:
@@ -26,14 +10,13 @@ class BoolStabilizer:
     A container class for managing multiple BoolAttributes with configurable stabilization.
     
     This class provides a way to manage multiple boolean attributes that stabilize
-    their values based on count and duration thresholds. The stabilization behavior
-    can be configured to apply only for specific transitions (true→false, false→true,
-    or both).
+    their values based on count and duration thresholds. Each attribute can have its
+    own buffer_mode to control when stabilization is applied for that specific attribute.
     
     Attributes:
         count_threshold: Default count threshold for new attributes.
         duration_threshold: Default duration threshold for new attributes.
-        buffer_mode: The mode determining when buffering is applied.
+        buffer_mode: Default buffer mode for new attributes.
     """
     
     def __init__(
@@ -50,7 +33,7 @@ class BoolStabilizer:
                            Must be at least 1. Defaults to 1.
             duration_threshold: Default duration in seconds before a value changes.
                               Defaults to 0.0.
-            buffer_mode: When to apply buffering. Defaults to BufferMode.BOTH.
+            buffer_mode: Default buffer mode for new attributes. Defaults to BufferMode.BOTH.
         
         Raises:
             ValueError: If count_threshold is less than 1 or duration_threshold is negative.
@@ -77,12 +60,12 @@ class BoolStabilizer:
     
     @property
     def buffer_mode(self) -> BufferMode:
-        """Get the current buffer mode."""
+        """Get the default buffer mode for new attributes."""
         return self._buffer_mode
     
     @buffer_mode.setter
     def buffer_mode(self, mode: BufferMode) -> None:
-        """Set the buffer mode."""
+        """Set the default buffer mode for new attributes."""
         self._buffer_mode = mode
     
     def add_attribute(
@@ -90,7 +73,8 @@ class BoolStabilizer:
         name: str,
         initial_value: bool = False,
         count_threshold: Optional[int] = None,
-        duration_threshold: Optional[float] = None
+        duration_threshold: Optional[float] = None,
+        buffer_mode: Optional[BufferMode] = None
     ) -> BoolAttribute:
         """
         Add a new BoolAttribute to the stabilizer.
@@ -102,6 +86,8 @@ class BoolStabilizer:
                            Uses stabilizer default if None.
             duration_threshold: Duration threshold for this attribute.
                               Uses stabilizer default if None.
+            buffer_mode: Buffer mode for this attribute.
+                        Uses stabilizer default if None.
         
         Returns:
             The created BoolAttribute.
@@ -116,7 +102,8 @@ class BoolStabilizer:
             name=name,
             initial_value=initial_value,
             count_threshold=count_threshold if count_threshold is not None else self._count_threshold,
-            duration_threshold=duration_threshold if duration_threshold is not None else self._duration_threshold
+            duration_threshold=duration_threshold if duration_threshold is not None else self._duration_threshold,
+            buffer_mode=buffer_mode if buffer_mode is not None else self._buffer_mode
         )
         self._attributes[name] = attr
         return attr
@@ -152,7 +139,7 @@ class BoolStabilizer:
         """
         Report a new value for an attribute.
         
-        The buffering behavior depends on the buffer_mode setting:
+        The buffering behavior depends on the attribute's buffer_mode setting:
         - BOTH: Always apply buffering
         - TRUE_TO_FALSE: Only buffer when transitioning from True to False
         - FALSE_TO_TRUE: Only buffer when transitioning from False to True
@@ -171,40 +158,7 @@ class BoolStabilizer:
         if name not in self._attributes:
             raise KeyError(f"Attribute '{name}' does not exist")
         
-        attr = self._attributes[name]
-        current_value = attr.value
-        
-        # Determine if buffering should be applied for this transition
-        apply_buffer = self._should_apply_buffer(current_value, new_value)
-        
-        return attr.report(new_value, apply_buffer=apply_buffer)
-    
-    def _should_apply_buffer(self, current_value: bool, new_value: bool) -> bool:
-        """
-        Determine if buffering should be applied for a transition.
-        
-        Args:
-            current_value: The current stabilized value.
-            new_value: The new value being reported.
-        
-        Returns:
-            True if buffering should be applied, False otherwise.
-        """
-        if self._buffer_mode == BufferMode.NONE:
-            return False
-        
-        if self._buffer_mode == BufferMode.BOTH:
-            return True
-        
-        if self._buffer_mode == BufferMode.TRUE_TO_FALSE:
-            # Only buffer when going from True to False
-            return current_value is True and new_value is False
-        
-        if self._buffer_mode == BufferMode.FALSE_TO_TRUE:
-            # Only buffer when going from False to True
-            return current_value is False and new_value is True
-        
-        return True
+        return self._attributes[name].report(new_value)
     
     def get_value(self, name: str) -> bool:
         """

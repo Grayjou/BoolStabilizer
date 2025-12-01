@@ -50,23 +50,36 @@ class TestBoolStabilizerAttributes(unittest.TestCase):
         self.assertIn("test", stabilizer)
         self.assertEqual(len(stabilizer), 1)
         self.assertFalse(attr.value)
+        self.assertEqual(attr.buffer_mode, BufferMode.BOTH)
     
     def test_add_attribute_with_custom_values(self):
         """Test adding an attribute with custom values."""
         stabilizer = BoolStabilizer(count_threshold=10, duration_threshold=5.0)
-        attr = stabilizer.add_attribute("test", initial_value=True, count_threshold=3, duration_threshold=1.0)
+        attr = stabilizer.add_attribute(
+            "test",
+            initial_value=True,
+            count_threshold=3,
+            duration_threshold=1.0,
+            buffer_mode=BufferMode.TRUE_TO_FALSE
+        )
         
         self.assertTrue(attr.value)
         self.assertEqual(attr.count_threshold, 3)
         self.assertEqual(attr.duration_threshold, 1.0)
+        self.assertEqual(attr.buffer_mode, BufferMode.TRUE_TO_FALSE)
     
     def test_add_attribute_uses_defaults(self):
         """Test that add_attribute uses stabilizer defaults when not specified."""
-        stabilizer = BoolStabilizer(count_threshold=5, duration_threshold=2.0)
+        stabilizer = BoolStabilizer(
+            count_threshold=5,
+            duration_threshold=2.0,
+            buffer_mode=BufferMode.FALSE_TO_TRUE
+        )
         attr = stabilizer.add_attribute("test")
         
         self.assertEqual(attr.count_threshold, 5)
         self.assertEqual(attr.duration_threshold, 2.0)
+        self.assertEqual(attr.buffer_mode, BufferMode.FALSE_TO_TRUE)
     
     def test_add_duplicate_attribute_raises(self):
         """Test that adding duplicate attribute raises ValueError."""
@@ -139,80 +152,72 @@ class TestBoolStabilizerReport(unittest.TestCase):
         self.assertTrue(stabilizer.report("test", True))
 
 
-class TestBoolStabilizerBufferMode(unittest.TestCase):
-    """Test BoolStabilizer buffer mode functionality."""
+class TestBoolStabilizerBufferModePerAttribute(unittest.TestCase):
+    """Test BoolStabilizer with per-attribute buffer modes."""
     
-    def test_buffer_mode_both(self):
-        """Test BufferMode.BOTH applies buffering in both directions."""
-        stabilizer = BoolStabilizer(count_threshold=3, buffer_mode=BufferMode.BOTH)
-        stabilizer.add_attribute("test", initial_value=False)
+    def test_different_buffer_modes_per_attribute(self):
+        """Test that different attributes can have different buffer modes."""
+        stabilizer = BoolStabilizer(count_threshold=3)
         
-        # False to True - should be buffered
-        stabilizer.report("test", True)
-        stabilizer.report("test", True)
-        self.assertFalse(stabilizer.get_value("test"))  # Not changed yet
-        stabilizer.report("test", True)
-        self.assertTrue(stabilizer.get_value("test"))  # Changed after 3 reports
+        # Add attributes with different buffer modes
+        stabilizer.add_attribute("buffered", initial_value=False, buffer_mode=BufferMode.BOTH)
+        stabilizer.add_attribute("unbuffered", initial_value=False, buffer_mode=BufferMode.NONE)
+        stabilizer.add_attribute("only_t2f", initial_value=False, buffer_mode=BufferMode.TRUE_TO_FALSE)
         
-        # True to False - should also be buffered
-        stabilizer.report("test", False)
-        stabilizer.report("test", False)
-        self.assertTrue(stabilizer.get_value("test"))  # Not changed yet
-        stabilizer.report("test", False)
-        self.assertFalse(stabilizer.get_value("test"))  # Changed after 3 reports
-    
-    def test_buffer_mode_true_to_false(self):
-        """Test BufferMode.TRUE_TO_FALSE only buffers true→false transitions."""
-        stabilizer = BoolStabilizer(count_threshold=3, buffer_mode=BufferMode.TRUE_TO_FALSE)
-        stabilizer.add_attribute("test", initial_value=False)
+        # Buffered attribute needs 3 reports
+        stabilizer.report("buffered", True)
+        stabilizer.report("buffered", True)
+        self.assertFalse(stabilizer.get_value("buffered"))
+        stabilizer.report("buffered", True)
+        self.assertTrue(stabilizer.get_value("buffered"))
         
-        # False to True - should NOT be buffered (immediate change)
-        result = stabilizer.report("test", True)
-        self.assertTrue(result)  # Changed immediately
-        
-        # True to False - should be buffered
-        stabilizer.report("test", False)
-        stabilizer.report("test", False)
-        self.assertTrue(stabilizer.get_value("test"))  # Not changed yet
-        stabilizer.report("test", False)
-        self.assertFalse(stabilizer.get_value("test"))  # Changed after 3 reports
-    
-    def test_buffer_mode_false_to_true(self):
-        """Test BufferMode.FALSE_TO_TRUE only buffers false→true transitions."""
-        stabilizer = BoolStabilizer(count_threshold=3, buffer_mode=BufferMode.FALSE_TO_TRUE)
-        stabilizer.add_attribute("test", initial_value=True)
-        
-        # True to False - should NOT be buffered (immediate change)
-        result = stabilizer.report("test", False)
-        self.assertFalse(result)  # Changed immediately
-        
-        # False to True - should be buffered
-        stabilizer.report("test", True)
-        stabilizer.report("test", True)
-        self.assertFalse(stabilizer.get_value("test"))  # Not changed yet
-        stabilizer.report("test", True)
-        self.assertTrue(stabilizer.get_value("test"))  # Changed after 3 reports
-    
-    def test_buffer_mode_none(self):
-        """Test BufferMode.NONE never applies buffering."""
-        stabilizer = BoolStabilizer(count_threshold=3, buffer_mode=BufferMode.NONE)
-        stabilizer.add_attribute("test", initial_value=False)
-        
-        # False to True - immediate change
-        result = stabilizer.report("test", True)
+        # Unbuffered attribute changes immediately
+        result = stabilizer.report("unbuffered", True)
         self.assertTrue(result)
         
-        # True to False - immediate change
-        result = stabilizer.report("test", False)
-        self.assertFalse(result)
+        # Only_t2f: False to True is immediate, True to False is buffered
+        result = stabilizer.report("only_t2f", True)
+        self.assertTrue(result)  # Immediate change
+        
+        stabilizer.report("only_t2f", False)
+        stabilizer.report("only_t2f", False)
+        self.assertTrue(stabilizer.get_value("only_t2f"))  # Not changed yet
+        stabilizer.report("only_t2f", False)
+        self.assertFalse(stabilizer.get_value("only_t2f"))  # Changed after 3 reports
     
-    def test_buffer_mode_setter(self):
-        """Test setting buffer_mode after initialization."""
+    def test_attribute_buffer_mode_override(self):
+        """Test that attribute buffer_mode can be changed after creation."""
+        stabilizer = BoolStabilizer(count_threshold=3, buffer_mode=BufferMode.BOTH)
+        attr = stabilizer.add_attribute("test", initial_value=False)
+        
+        # Initially uses stabilizer default (BOTH)
+        self.assertEqual(attr.buffer_mode, BufferMode.BOTH)
+        
+        # Change to NONE - reports should now be immediate
+        attr.buffer_mode = BufferMode.NONE
+        result = stabilizer.report("test", True)
+        self.assertTrue(result)  # Immediate change
+    
+    def test_buffer_mode_default_inheritance(self):
+        """Test that new attributes inherit the stabilizer's default buffer_mode."""
+        stabilizer = BoolStabilizer(buffer_mode=BufferMode.TRUE_TO_FALSE)
+        attr = stabilizer.add_attribute("test")
+        
+        self.assertEqual(attr.buffer_mode, BufferMode.TRUE_TO_FALSE)
+    
+    def test_buffer_mode_setter_changes_default(self):
+        """Test that changing stabilizer's buffer_mode affects new attributes."""
         stabilizer = BoolStabilizer(buffer_mode=BufferMode.BOTH)
-        self.assertEqual(stabilizer.buffer_mode, BufferMode.BOTH)
+        
+        attr1 = stabilizer.add_attribute("attr1")
+        self.assertEqual(attr1.buffer_mode, BufferMode.BOTH)
         
         stabilizer.buffer_mode = BufferMode.NONE
-        self.assertEqual(stabilizer.buffer_mode, BufferMode.NONE)
+        attr2 = stabilizer.add_attribute("attr2")
+        self.assertEqual(attr2.buffer_mode, BufferMode.NONE)
+        
+        # attr1 should still have its original buffer_mode
+        self.assertEqual(attr1.buffer_mode, BufferMode.BOTH)
 
 
 class TestBoolStabilizerValues(unittest.TestCase):
