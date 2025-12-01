@@ -317,5 +317,127 @@ class TestBoolStabilizerRepr(unittest.TestCase):
         self.assertIn("test", repr_str)
 
 
+class TestBoolStabilizerPerDirectionThresholds(unittest.TestCase):
+    """Test BoolStabilizer per-direction threshold functionality."""
+
+    def test_init_with_per_direction_count_thresholds(self):
+        """Test initialization with per-direction count thresholds."""
+        stabilizer = BoolStabilizer(
+            count_threshold=5,
+            count_threshold_true_to_false=3,
+            count_threshold_false_to_true=7,
+        )
+        self.assertEqual(stabilizer.count_threshold_true_to_false, 3)
+        self.assertEqual(stabilizer.count_threshold_false_to_true, 7)
+
+    def test_init_with_per_direction_duration_thresholds(self):
+        """Test initialization with per-direction duration thresholds."""
+        stabilizer = BoolStabilizer(
+            duration_threshold=1.0,
+            duration_threshold_true_to_false=0.5,
+            duration_threshold_false_to_true=2.0,
+        )
+        self.assertEqual(stabilizer.duration_threshold_true_to_false, 0.5)
+        self.assertEqual(stabilizer.duration_threshold_false_to_true, 2.0)
+
+    def test_per_direction_properties_return_none_when_not_set(self):
+        """Test that per-direction properties return None when not set."""
+        stabilizer = BoolStabilizer()
+        self.assertIsNone(stabilizer.count_threshold_true_to_false)
+        self.assertIsNone(stabilizer.count_threshold_false_to_true)
+        self.assertIsNone(stabilizer.duration_threshold_true_to_false)
+        self.assertIsNone(stabilizer.duration_threshold_false_to_true)
+
+    def test_add_attribute_inherits_per_direction_thresholds(self):
+        """Test that add_attribute inherits per-direction thresholds from stabilizer."""
+        stabilizer = BoolStabilizer(
+            count_threshold=5,
+            count_threshold_true_to_false=3,
+            count_threshold_false_to_true=7,
+            duration_threshold_true_to_false=0.5,
+            duration_threshold_false_to_true=1.5,
+        )
+        attr = stabilizer.add_attribute("test")
+        
+        self.assertEqual(attr.count_threshold_true_to_false, 3)
+        self.assertEqual(attr.count_threshold_false_to_true, 7)
+        self.assertEqual(attr.duration_threshold_true_to_false, 0.5)
+        self.assertEqual(attr.duration_threshold_false_to_true, 1.5)
+
+    def test_add_attribute_can_override_per_direction_thresholds(self):
+        """Test that add_attribute can override per-direction thresholds."""
+        stabilizer = BoolStabilizer(
+            count_threshold=5,
+            count_threshold_true_to_false=3,
+            count_threshold_false_to_true=7,
+        )
+        attr = stabilizer.add_attribute(
+            "test",
+            count_threshold_true_to_false=10,
+            count_threshold_false_to_true=20,
+        )
+        
+        self.assertEqual(attr.count_threshold_true_to_false, 10)
+        self.assertEqual(attr.count_threshold_false_to_true, 20)
+
+    def test_per_direction_thresholds_used_in_report(self):
+        """Test that per-direction thresholds are actually used when reporting values."""
+        stabilizer = BoolStabilizer(
+            count_threshold=10,  # Default not used
+            count_threshold_true_to_false=2,
+            count_threshold_false_to_true=3,
+        )
+        stabilizer.add_attribute("test", initial_value=False)
+        
+        # False to True: needs 3 reports
+        stabilizer.report("test", True)
+        stabilizer.report("test", True)
+        self.assertFalse(stabilizer.get_value("test"))  # Not changed (2 < 3)
+        stabilizer.report("test", True)
+        self.assertTrue(stabilizer.get_value("test"))  # Changed after 3
+
+        # True to False: needs 2 reports
+        stabilizer.report("test", False)
+        self.assertTrue(stabilizer.get_value("test"))  # Not changed (1 < 2)
+        stabilizer.report("test", False)
+        self.assertFalse(stabilizer.get_value("test"))  # Changed after 2
+
+    def test_mixed_per_direction_and_default_thresholds(self):
+        """Test mixing per-direction thresholds with defaults."""
+        stabilizer = BoolStabilizer(
+            count_threshold=4,
+            count_threshold_false_to_true=2,  # Override for false→true only
+        )
+        stabilizer.add_attribute("test", initial_value=False)
+        
+        # False to True: uses specific (2)
+        stabilizer.report("test", True)
+        self.assertFalse(stabilizer.get_value("test"))  # Not changed (1 < 2)
+        stabilizer.report("test", True)
+        self.assertTrue(stabilizer.get_value("test"))  # Changed after 2
+
+        # True to False: uses default (4)
+        stabilizer.report("test", False)
+        stabilizer.report("test", False)
+        stabilizer.report("test", False)
+        self.assertTrue(stabilizer.get_value("test"))  # Not changed (3 < 4)
+        stabilizer.report("test", False)
+        self.assertFalse(stabilizer.get_value("test"))  # Changed after 4
+
+    def test_attribute_override_with_none_uses_stabilizer_default(self):
+        """Test that None override in add_attribute uses stabilizer default."""
+        stabilizer = BoolStabilizer(
+            count_threshold=5,
+            count_threshold_true_to_false=3,
+        )
+        # Explicitly pass None - should use stabilizer default (3)
+        attr = stabilizer.add_attribute(
+            "test",
+            count_threshold_true_to_false=None,
+        )
+        
+        self.assertEqual(attr.count_threshold_true_to_false, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

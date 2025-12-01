@@ -112,6 +112,26 @@ class BoolAttribute:
         if true_to_false != false_to_true:
             raise ValueError("Duration thresholds differ for true→false and false→true transitions")
         return self._duration_threshold
+
+    @property
+    def count_threshold_true_to_false(self) -> Optional[int]:
+        """Get the count threshold for true→false transitions, or None if using default."""
+        return self._count_threshold_true_to_false
+
+    @property
+    def count_threshold_false_to_true(self) -> Optional[int]:
+        """Get the count threshold for false→true transitions, or None if using default."""
+        return self._count_threshold_false_to_true
+
+    @property
+    def duration_threshold_true_to_false(self) -> Optional[float]:
+        """Get the duration threshold for true→false transitions, or None if using default."""
+        return self._duration_threshold_true_to_false
+
+    @property
+    def duration_threshold_false_to_true(self) -> Optional[float]:
+        """Get the duration threshold for false→true transitions, or None if using default."""
+        return self._duration_threshold_false_to_true
     
     @property
     def buffer_mode(self) -> BufferMode:
@@ -216,8 +236,36 @@ class BoolAttribute:
     
     def _check_thresholds(self) -> bool:
         """Check if both count and duration thresholds are met."""
-        count_met = self._pending_count >= self._count_threshold
-        duration_met = self.pending_duration >= self._duration_threshold
+        # Determine which thresholds to use based on transition direction
+        # pending_value == True means we're transitioning from False to True
+        # pending_value == False means we're transitioning from True to False
+        if self._pending_value:
+            # False to True transition
+            count_threshold = (
+                self._count_threshold_false_to_true
+                if self._count_threshold_false_to_true is not None
+                else self._count_threshold
+            )
+            duration_threshold = (
+                self._duration_threshold_false_to_true
+                if self._duration_threshold_false_to_true is not None
+                else self._duration_threshold
+            )
+        else:
+            # True to False transition
+            count_threshold = (
+                self._count_threshold_true_to_false
+                if self._count_threshold_true_to_false is not None
+                else self._count_threshold
+            )
+            duration_threshold = (
+                self._duration_threshold_true_to_false
+                if self._duration_threshold_true_to_false is not None
+                else self._duration_threshold
+            )
+
+        count_met = self._pending_count >= count_threshold
+        duration_met = self.pending_duration >= duration_threshold
         return count_met and duration_met
     
     def _reset_pending(self) -> None:
