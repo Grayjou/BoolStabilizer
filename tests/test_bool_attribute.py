@@ -140,7 +140,7 @@ class TestBoolAttributeBufferMode(unittest.TestCase):
         
         # True to False - should NOT be buffered (immediate change)
         result = attr.report(False)
-        self.assertFalse(result)  # Changed immediately
+        self.assertFalse(result)  # Returns new stabilized value (False)
         
         # False to True - should be buffered
         attr.report(True)
@@ -155,11 +155,11 @@ class TestBoolAttributeBufferMode(unittest.TestCase):
         
         # False to True - immediate change
         result = attr.report(True)
-        self.assertTrue(result)
+        self.assertTrue(result)  # Returns new stabilized value (True)
         
         # True to False - immediate change
         result = attr.report(False)
-        self.assertFalse(result)
+        self.assertFalse(result)  # Returns new stabilized value (False)
     
     def test_buffer_mode_setter(self):
         """Test setting buffer_mode after initialization."""
