@@ -234,5 +234,134 @@ class TestBoolAttributeRepr(unittest.TestCase):
         self.assertIn("buffer_mode", repr_str)
 
 
+class TestBoolAttributePerDirectionThresholds(unittest.TestCase):
+    """Test BoolAttribute per-direction threshold functionality."""
+
+    def test_per_direction_count_thresholds_initialization(self):
+        """Test initialization with per-direction count thresholds."""
+        attr = BoolAttribute(
+            "test",
+            count_threshold=5,
+            count_threshold_true_to_false=3,
+            count_threshold_false_to_true=7,
+        )
+        self.assertEqual(attr.count_threshold_true_to_false, 3)
+        self.assertEqual(attr.count_threshold_false_to_true, 7)
+
+    def test_per_direction_duration_thresholds_initialization(self):
+        """Test initialization with per-direction duration thresholds."""
+        attr = BoolAttribute(
+            "test",
+            duration_threshold=1.0,
+            duration_threshold_true_to_false=0.5,
+            duration_threshold_false_to_true=2.0,
+        )
+        self.assertEqual(attr.duration_threshold_true_to_false, 0.5)
+        self.assertEqual(attr.duration_threshold_false_to_true, 2.0)
+
+    def test_different_count_thresholds_per_direction(self):
+        """Test that different count thresholds apply per direction."""
+        attr = BoolAttribute(
+            "test",
+            initial_value=False,
+            count_threshold=5,  # Default (not used if per-direction set)
+            count_threshold_false_to_true=3,
+            count_threshold_true_to_false=2,
+        )
+        
+        # False to True: needs 3 reports
+        attr.report(True)
+        attr.report(True)
+        self.assertFalse(attr.value)  # Not changed yet (2 < 3)
+        attr.report(True)
+        self.assertTrue(attr.value)  # Changed after 3 reports
+
+        # True to False: needs 2 reports
+        attr.report(False)
+        self.assertTrue(attr.value)  # Not changed yet (1 < 2)
+        attr.report(False)
+        self.assertFalse(attr.value)  # Changed after 2 reports
+
+    def test_different_duration_thresholds_per_direction(self):
+        """Test that different duration thresholds apply per direction."""
+        attr = BoolAttribute(
+            "test",
+            initial_value=False,
+            count_threshold=1,
+            duration_threshold=1.0,  # Default (not used if per-direction set)
+            duration_threshold_false_to_true=0.1,
+            duration_threshold_true_to_false=0.2,
+        )
+        
+        # False to True: needs 0.1 seconds
+        attr.report(True)
+        self.assertFalse(attr.value)  # Not changed yet (duration not met)
+        time.sleep(0.15)
+        attr.report(True)
+        self.assertTrue(attr.value)  # Changed after duration met
+
+        # True to False: needs 0.2 seconds
+        attr.report(False)
+        self.assertTrue(attr.value)  # Not changed yet (duration not met)
+        time.sleep(0.1)  # Still under 0.2 seconds
+        attr.report(False)
+        self.assertTrue(attr.value)  # Still not changed
+        time.sleep(0.15)  # Now over 0.2 seconds total
+        attr.report(False)
+        self.assertFalse(attr.value)  # Changed after duration met
+
+    def test_per_direction_threshold_with_none_uses_default(self):
+        """Test that None per-direction thresholds use the default."""
+        attr = BoolAttribute(
+            "test",
+            initial_value=False,
+            count_threshold=2,
+            count_threshold_false_to_true=None,  # Use default (2)
+            count_threshold_true_to_false=4,
+        )
+        
+        # False to True: uses default (2)
+        attr.report(True)
+        self.assertFalse(attr.value)
+        attr.report(True)
+        self.assertTrue(attr.value)
+
+        # True to False: uses specific (4)
+        attr.report(False)
+        attr.report(False)
+        attr.report(False)
+        self.assertTrue(attr.value)  # Not changed yet (3 < 4)
+        attr.report(False)
+        self.assertFalse(attr.value)  # Changed after 4 reports
+
+    def test_per_direction_properties_return_none_when_not_set(self):
+        """Test that per-direction properties return None when not set."""
+        attr = BoolAttribute("test")
+        self.assertIsNone(attr.count_threshold_true_to_false)
+        self.assertIsNone(attr.count_threshold_false_to_true)
+        self.assertIsNone(attr.duration_threshold_true_to_false)
+        self.assertIsNone(attr.duration_threshold_false_to_true)
+
+    def test_combined_per_direction_count_and_duration_thresholds(self):
+        """Test combined per-direction count and duration thresholds."""
+        attr = BoolAttribute(
+            "test",
+            initial_value=False,
+            count_threshold=1,
+            duration_threshold=0.0,
+            count_threshold_false_to_true=2,
+            duration_threshold_false_to_true=0.1,
+        )
+        
+        # False to True: needs 2 reports AND 0.1 seconds
+        attr.report(True)
+        self.assertFalse(attr.value)  # Not changed (1 < 2)
+        attr.report(True)
+        self.assertFalse(attr.value)  # Not changed (count met but duration not met)
+        time.sleep(0.15)
+        attr.report(True)
+        self.assertTrue(attr.value)  # Changed (both thresholds met)
+
+
 if __name__ == "__main__":
     unittest.main()

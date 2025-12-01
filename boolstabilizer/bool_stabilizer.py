@@ -17,13 +17,22 @@ class BoolStabilizer:
         count_threshold: Default count threshold for new attributes.
         duration_threshold: Default duration threshold for new attributes.
         buffer_mode: Default buffer mode for new attributes.
+        count_threshold_true_to_false: Default count threshold for true→false transitions.
+        count_threshold_false_to_true: Default count threshold for false→true transitions.
+        duration_threshold_true_to_false: Default duration threshold for true→false transitions.
+        duration_threshold_false_to_true: Default duration threshold for false→true transitions.
     """
     
     def __init__(
         self,
         count_threshold: int = 1,
         duration_threshold: float = 0.0,
-        buffer_mode: BufferMode = BufferMode.BOTH
+        buffer_mode: BufferMode = BufferMode.BOTH,
+        *,
+        count_threshold_true_to_false: Optional[int] = None,
+        count_threshold_false_to_true: Optional[int] = None,
+        duration_threshold_true_to_false: Optional[float] = None,
+        duration_threshold_false_to_true: Optional[float] = None,
     ):
         """
         Initialize a BoolStabilizer.
@@ -34,6 +43,14 @@ class BoolStabilizer:
             duration_threshold: Default duration in seconds before a value changes.
                               Defaults to 0.0.
             buffer_mode: Default buffer mode for new attributes. Defaults to BufferMode.BOTH.
+            count_threshold_true_to_false: Default count threshold for true→false transitions.
+                                          Uses count_threshold if None.
+            count_threshold_false_to_true: Default count threshold for false→true transitions.
+                                          Uses count_threshold if None.
+            duration_threshold_true_to_false: Default duration threshold for true→false transitions.
+                                             Uses duration_threshold if None.
+            duration_threshold_false_to_true: Default duration threshold for false→true transitions.
+                                             Uses duration_threshold if None.
         
         Raises:
             ValueError: If count_threshold is less than 1 or duration_threshold is negative.
@@ -46,6 +63,10 @@ class BoolStabilizer:
         self._count_threshold = count_threshold
         self._duration_threshold = duration_threshold
         self._buffer_mode = buffer_mode
+        self._count_threshold_true_to_false = count_threshold_true_to_false
+        self._count_threshold_false_to_true = count_threshold_false_to_true
+        self._duration_threshold_true_to_false = duration_threshold_true_to_false
+        self._duration_threshold_false_to_true = duration_threshold_false_to_true
         self._attributes: Dict[str, BoolAttribute] = {}
     
     @property
@@ -57,6 +78,26 @@ class BoolStabilizer:
     def duration_threshold(self) -> float:
         """Get the default duration threshold."""
         return self._duration_threshold
+
+    @property
+    def count_threshold_true_to_false(self) -> Optional[int]:
+        """Get the default count threshold for true→false transitions, or None if using default."""
+        return self._count_threshold_true_to_false
+
+    @property
+    def count_threshold_false_to_true(self) -> Optional[int]:
+        """Get the default count threshold for false→true transitions, or None if using default."""
+        return self._count_threshold_false_to_true
+
+    @property
+    def duration_threshold_true_to_false(self) -> Optional[float]:
+        """Get the default duration threshold for true→false transitions, or None if using default."""
+        return self._duration_threshold_true_to_false
+
+    @property
+    def duration_threshold_false_to_true(self) -> Optional[float]:
+        """Get the default duration threshold for false→true transitions, or None if using default."""
+        return self._duration_threshold_false_to_true
     
     @property
     def buffer_mode(self) -> BufferMode:
@@ -74,7 +115,12 @@ class BoolStabilizer:
         initial_value: bool = False,
         count_threshold: Optional[int] = None,
         duration_threshold: Optional[float] = None,
-        buffer_mode: Optional[BufferMode] = None
+        buffer_mode: Optional[BufferMode] = None,
+        *,
+        count_threshold_true_to_false: Optional[int] = None,
+        count_threshold_false_to_true: Optional[int] = None,
+        duration_threshold_true_to_false: Optional[float] = None,
+        duration_threshold_false_to_true: Optional[float] = None,
     ) -> BoolAttribute:
         """
         Add a new BoolAttribute to the stabilizer.
@@ -88,6 +134,14 @@ class BoolStabilizer:
                               Uses stabilizer default if None.
             buffer_mode: Buffer mode for this attribute.
                         Uses stabilizer default if None.
+            count_threshold_true_to_false: Count threshold for true→false transitions.
+                                          Uses stabilizer default if None.
+            count_threshold_false_to_true: Count threshold for false→true transitions.
+                                          Uses stabilizer default if None.
+            duration_threshold_true_to_false: Duration threshold for true→false transitions.
+                                             Uses stabilizer default if None.
+            duration_threshold_false_to_true: Duration threshold for false→true transitions.
+                                             Uses stabilizer default if None.
         
         Returns:
             The created BoolAttribute.
@@ -97,13 +151,39 @@ class BoolStabilizer:
         """
         if name in self._attributes:
             raise ValueError(f"Attribute '{name}' already exists")
+
+        # Use attribute-specific values if provided, otherwise fall back to stabilizer defaults
+        resolved_count_t2f = (
+            count_threshold_true_to_false
+            if count_threshold_true_to_false is not None
+            else self._count_threshold_true_to_false
+        )
+        resolved_count_f2t = (
+            count_threshold_false_to_true
+            if count_threshold_false_to_true is not None
+            else self._count_threshold_false_to_true
+        )
+        resolved_duration_t2f = (
+            duration_threshold_true_to_false
+            if duration_threshold_true_to_false is not None
+            else self._duration_threshold_true_to_false
+        )
+        resolved_duration_f2t = (
+            duration_threshold_false_to_true
+            if duration_threshold_false_to_true is not None
+            else self._duration_threshold_false_to_true
+        )
         
         attr = BoolAttribute(
             name=name,
             initial_value=initial_value,
             count_threshold=count_threshold if count_threshold is not None else self._count_threshold,
             duration_threshold=duration_threshold if duration_threshold is not None else self._duration_threshold,
-            buffer_mode=buffer_mode if buffer_mode is not None else self._buffer_mode
+            buffer_mode=buffer_mode if buffer_mode is not None else self._buffer_mode,
+            count_threshold_true_to_false=resolved_count_t2f,
+            count_threshold_false_to_true=resolved_count_f2t,
+            duration_threshold_true_to_false=resolved_duration_t2f,
+            duration_threshold_false_to_true=resolved_duration_f2t,
         )
         self._attributes[name] = attr
         return attr
