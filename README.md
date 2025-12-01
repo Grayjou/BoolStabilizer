@@ -4,10 +4,14 @@ A Python library for stabilizing boolean values based on configurable count and 
 
 ## Overview
 
-BoolStabilizer provides classes that prevent boolean values from changing until certain conditions are met:
-- **Count threshold**: The number of times a new value must be reported before it takes effect
-- **Duration threshold**: How long a new value must be consistently reported before it takes effect
-- **Buffer mode**: Control which transitions are buffered (true→false, false→true, or both)
+BoolStabilizer provides classes that prevent boolean values from changing until certain conditions are met.
+Thresholds can be symmetric or asymmetric:
+
+- **Count threshold**: How many consecutive reports are required before a transition is accepted  
+- **Duration threshold**: How long a new value must be continuously reported before being accepted  
+- **Asymmetric thresholds**: You may use different thresholds for true→false vs false→true transitions  
+- **Buffer mode**: Control which transitions are stabilized (true→false, false→true, or both)
+
 
 This is useful for debouncing, filtering noise from sensor data, or any scenario where you want to prevent rapid boolean state changes.
 
@@ -46,6 +50,38 @@ stabilizer.report("sensor1", True)  # Count: 3/3 - now True (if duration met)
 print(stabilizer.get_value("sensor1"))
 ```
 
+## Asymmetric Thresholds
+
+Starting in vX.X.X, BoolStabilizer supports asymmetric stabilization:
+you can specify different thresholds for **true→false** and **false→true** transitions.
+
+If a per-direction threshold is not provided, it falls back to the base
+`count_threshold` or `duration_threshold`.
+
+### Example
+
+```python
+from boolstabilizer import BoolStabilizer
+
+# Quick to turn on, slow to turn off
+stabilizer = BoolStabilizer(
+    count_threshold_false_to_true=2,
+    count_threshold_true_to_false=5,
+)
+
+stabilizer.add_attribute("sensor", initial_value=False)
+
+# Turns True after 2 reports
+stabilizer.report("sensor", True)
+stabilizer.report("sensor", True)
+assert stabilizer.get_value("sensor") == True
+
+# Turns False after 5 reports
+for _ in range(5):
+    stabilizer.report("sensor", False)
+assert stabilizer.get_value("sensor") == False
+```
+
 ## Buffer Modes
 
 Each attribute can have its own buffer mode, controlling when stabilization is applied:
@@ -80,32 +116,42 @@ attr.buffer_mode = BufferMode.NONE
 
 ## BoolAttribute Class
 
-For more direct control, use `BoolAttribute` directly:
+`BoolAttribute` supports both symmetric and asymmetric thresholds.
+
+You may specify:
+
+- `count_threshold` / `duration_threshold` (symmetric)
+- `count_threshold_true_to_false`
+- `count_threshold_false_to_true`
+- `duration_threshold_true_to_false`
+- `duration_threshold_false_to_true`
+
+If a per-direction threshold is omitted, the symmetric threshold is used.
+
+### Example
 
 ```python
 from boolstabilizer import BoolAttribute, BufferMode
 
-# Create an attribute with custom thresholds and buffer mode
 attr = BoolAttribute(
     name="my_bool",
     initial_value=False,
-    count_threshold=5,
-    duration_threshold=1.0,
+    count_threshold=3,
+    count_threshold_false_to_true=1,   # faster to turn on
+    count_threshold_true_to_false=5,   # slower to turn off
+    duration_threshold=0.5,
     buffer_mode=BufferMode.BOTH
 )
 
-# Report values
-attr.report(True)  # Start tracking
-print(attr.pending_count)     # Number of times True has been reported
-print(attr.pending_duration)  # How long True has been pending
-print(attr.buffer_mode)       # Current buffer mode
+attr.report(True)
+print(attr.pending_count)
+print(attr.pending_duration)
+print(attr.buffer_mode)
 
-# Change buffer mode at runtime
+# Update buffer mode dynamically
 attr.buffer_mode = BufferMode.NONE
-attr.report(True)  # Now changes immediately
+attr.report(True)  # immediate
 
-# Reset pending state
-attr.reset()
 ```
 
 ## API Reference
@@ -114,37 +160,49 @@ attr.reset()
 
 | Method | Description |
 |--------|-------------|
-| `add_attribute(name, initial_value, count_threshold, duration_threshold, buffer_mode)` | Add a new boolean attribute |
+| `add_attribute(name, initial_value, ..., count_threshold_false_to_true, count_threshold_true_to_false, duration_threshold_false_to_true, duration_threshold_true_to_false)` | Add a new boolean attribute |
 | `remove_attribute(name)` | Remove an attribute |
-| `get_attribute(name)` | Get the BoolAttribute object |
-| `report(name, new_value)` | Report a new value for an attribute |
-| `get_value(name)` | Get the current stabilized value |
-| `get_all_values()` | Get all values as a dictionary |
-| `reset_all()` | Reset all pending states |
+| `get_attribute(name)` | Get the BoolAttribute |
+| `report(name, new_value)` | Report a new value |
+| `get_value(name)` | Current stabilized value |
+| `get_all_values()` | Dictionary of all values |
+| `reset_all()` | Reset all attributes |
+
+#### Default Threshold Properties
+
+The following defaults apply to newly added attributes:
 
 | Property | Description |
 |----------|-------------|
-| `count_threshold` | Default count threshold for new attributes |
-| `duration_threshold` | Default duration threshold for new attributes |
-| `buffer_mode` | Default buffer mode for new attributes |
+| `count_threshold` | Symmetric count threshold |
+| `duration_threshold` | Symmetric duration threshold |
+| `count_threshold_false_to_true` | Per-direction threshold (optional) |
+| `count_threshold_true_to_false` | Per-direction threshold (optional) |
+| `duration_threshold_false_to_true` | Per-direction threshold (optional) |
+| `duration_threshold_true_to_false` | Per-direction threshold (optional) |
+| `buffer_mode` | Default buffer mode |
 
 ### BoolAttribute
 
 | Property | Description |
 |----------|-------------|
-| `name` | The attribute name |
+| `name` | Attribute name |
 | `value` | Current stabilized value |
-| `count_threshold` | Required report count |
-| `duration_threshold` | Required duration in seconds |
-| `buffer_mode` | Buffer mode for this attribute (can be changed at runtime) |
-| `pending_count` | Current pending report count |
-| `pending_duration` | Current pending duration |
-| `pending_value` | The pending value (or None) |
+| `pending_value` | Pending transition value |
+| `pending_count` | Count of repeated reports |
+| `pending_duration` | Duration in seconds of consistent reports |
+| `count_threshold` | Symmetric count threshold |
+| `duration_threshold` | Symmetric duration threshold |
+| `count_threshold_false_to_true` | Optional per-direction threshold |
+| `count_threshold_true_to_false` | Optional per-direction threshold |
+| `duration_threshold_false_to_true` | Optional per-direction duration |
+| `duration_threshold_true_to_false` | Optional per-direction duration |
+| `buffer_mode` | Buffer mode (can be changed dynamically) |
 
 | Method | Description |
 |--------|-------------|
-| `report(new_value)` | Report a new value (respects buffer_mode) |
-| `reset(new_value)` | Reset pending state, optionally set new value |
+| `report(value)` | Report a new boolean value |
+| `reset(new_value=None)` | Reset pending state (and optionally force value) |
 
 ## License
 
