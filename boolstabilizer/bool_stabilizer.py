@@ -1,26 +1,29 @@
-"""BoolStabilizer class for managing multiple BoolAttributes."""
+"""Container for BoolAttribute instances sharing configuration defaults."""
 
-from typing import Dict, Iterator, Optional
+import time
+from typing import Callable, Dict, Iterator, Optional, Union
 
-from .bool_attribute import BoolAttribute, BufferMode
+from ._validation import (
+    validate_bool,
+    validate_buffer_mode,
+    validate_clock,
+    validate_count,
+    validate_duration,
+)
+from .bool_attribute import BoolAttribute
+from .bool_attribute_types import BufferMode, TransitionResult
+
+
+_INHERIT = object()
+DirectionalCount = Union[Optional[int], object]
+DirectionalDuration = Union[Optional[float], object]
 
 
 class BoolStabilizer:
-    """
-    A container class for managing multiple BoolAttributes with configurable stabilization.
-    
-    This class provides a way to manage multiple boolean attributes that stabilize
-    their values based on count and duration thresholds. Each attribute can have its
-    own buffer_mode to control when stabilization is applied for that specific attribute.
-    
-    Attributes:
-        count_threshold: Default count threshold for new attributes.
-        duration_threshold: Default duration threshold for new attributes.
-        buffer_mode: Default buffer mode for new attributes.
-        count_threshold_true_to_false: Default count threshold for true→false transitions.
-        count_threshold_false_to_true: Default count threshold for false→true transitions.
-        duration_threshold_true_to_false: Default duration threshold for true→false transitions.
-        duration_threshold_false_to_true: Default duration threshold for false→true transitions.
+    """Manage named boolean stabilizers with defaults for newly added attributes.
+
+    Defaults are copied into an attribute when it is created; subsequent manager
+    configuration changes do not alter existing attributes.
     """
 
     __slots__ = (
@@ -31,9 +34,10 @@ class BoolStabilizer:
         "_count_threshold_false_to_true",
         "_duration_threshold_true_to_false",
         "_duration_threshold_false_to_true",
+        "_clock",
         "_attributes",
     )
-    
+
     def __init__(
         self,
         count_threshold: int = 1,
@@ -44,82 +48,65 @@ class BoolStabilizer:
         count_threshold_false_to_true: Optional[int] = None,
         duration_threshold_true_to_false: Optional[float] = None,
         duration_threshold_false_to_true: Optional[float] = None,
-    ):
-        """
-        Initialize a BoolStabilizer.
-        
-        Args:
-            count_threshold: Default number of reports needed before a value changes.
-                           Must be at least 1. Defaults to 1.
-            duration_threshold: Default duration in seconds before a value changes.
-                              Defaults to 0.0.
-            buffer_mode: Default buffer mode for new attributes. Defaults to BufferMode.BOTH.
-            count_threshold_true_to_false: Default count threshold for true→false transitions.
-                                          Uses count_threshold if None.
-            count_threshold_false_to_true: Default count threshold for false→true transitions.
-                                          Uses count_threshold if None.
-            duration_threshold_true_to_false: Default duration threshold for true→false transitions.
-                                             Uses duration_threshold if None.
-            duration_threshold_false_to_true: Default duration threshold for false→true transitions.
-                                             Uses duration_threshold if None.
-        
-        Raises:
-            ValueError: If count_threshold is less than 1 or duration_threshold is negative.
-        """
-        if count_threshold < 1:
-            raise ValueError("count_threshold must be at least 1")
-        if duration_threshold < 0:
-            raise ValueError("duration_threshold cannot be negative")
-        
-        self._count_threshold = count_threshold
-        self._duration_threshold = duration_threshold
-        self._buffer_mode = buffer_mode
-        self._count_threshold_true_to_false = count_threshold_true_to_false
-        self._count_threshold_false_to_true = count_threshold_false_to_true
-        self._duration_threshold_true_to_false = duration_threshold_true_to_false
-        self._duration_threshold_false_to_true = duration_threshold_false_to_true
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        configured_count = validate_count(count_threshold, "count_threshold")
+        configured_duration = validate_duration(duration_threshold, "duration_threshold")
+        assert configured_count is not None
+        assert configured_duration is not None
+        self._count_threshold = configured_count
+        self._duration_threshold = configured_duration
+        self._buffer_mode = validate_buffer_mode(buffer_mode)
+        self._count_threshold_true_to_false = validate_count(
+            count_threshold_true_to_false, "count_threshold_true_to_false", allow_none=True
+        )
+        self._count_threshold_false_to_true = validate_count(
+            count_threshold_false_to_true, "count_threshold_false_to_true", allow_none=True
+        )
+        self._duration_threshold_true_to_false = validate_duration(
+            duration_threshold_true_to_false, "duration_threshold_true_to_false", allow_none=True
+        )
+        self._duration_threshold_false_to_true = validate_duration(
+            duration_threshold_false_to_true, "duration_threshold_false_to_true", allow_none=True
+        )
+        self._clock = validate_clock(clock)
         self._attributes: Dict[str, BoolAttribute] = {}
-    
+
     @property
     def count_threshold(self) -> int:
-        """Get the default count threshold."""
+        """Configured symmetric count default."""
         return self._count_threshold
-    
+
     @property
     def duration_threshold(self) -> float:
-        """Get the default duration threshold."""
+        """Configured symmetric duration default."""
         return self._duration_threshold
 
     @property
     def count_threshold_true_to_false(self) -> Optional[int]:
-        """Get the default count threshold for true→false transitions, or None if using default."""
         return self._count_threshold_true_to_false
 
     @property
     def count_threshold_false_to_true(self) -> Optional[int]:
-        """Get the default count threshold for false→true transitions, or None if using default."""
         return self._count_threshold_false_to_true
 
     @property
     def duration_threshold_true_to_false(self) -> Optional[float]:
-        """Get the default duration threshold for true→false transitions, or None if using default."""
         return self._duration_threshold_true_to_false
 
     @property
     def duration_threshold_false_to_true(self) -> Optional[float]:
-        """Get the default duration threshold for false→true transitions, or None if using default."""
         return self._duration_threshold_false_to_true
-    
+
     @property
     def buffer_mode(self) -> BufferMode:
-        """Get the default buffer mode for new attributes."""
+        """Default buffer mode for attributes added in the future."""
         return self._buffer_mode
-    
+
     @buffer_mode.setter
     def buffer_mode(self, mode: BufferMode) -> None:
-        """Set the default buffer mode for new attributes."""
-        self._buffer_mode = mode
-    
+        self._buffer_mode = validate_buffer_mode(mode)
+
     def add_attribute(
         self,
         name: str,
@@ -128,181 +115,147 @@ class BoolStabilizer:
         duration_threshold: Optional[float] = None,
         buffer_mode: Optional[BufferMode] = None,
         *,
-        count_threshold_true_to_false: Optional[int] = None,
-        count_threshold_false_to_true: Optional[int] = None,
-        duration_threshold_true_to_false: Optional[float] = None,
-        duration_threshold_false_to_true: Optional[float] = None,
+        count_threshold_true_to_false: DirectionalCount = _INHERIT,
+        count_threshold_false_to_true: DirectionalCount = _INHERIT,
+        duration_threshold_true_to_false: DirectionalDuration = _INHERIT,
+        duration_threshold_false_to_true: DirectionalDuration = _INHERIT,
+        clock: Optional[Callable[[], float]] = None,
     ) -> BoolAttribute:
-        """
-        Add a new BoolAttribute to the stabilizer.
-        
-        Args:
-            name: The name identifier for the attribute.
-            initial_value: The initial boolean value. Defaults to False.
-            count_threshold: Count threshold for this attribute.
-                           Uses stabilizer default if None.
-            duration_threshold: Duration threshold for this attribute.
-                              Uses stabilizer default if None.
-            buffer_mode: Buffer mode for this attribute.
-                        Uses stabilizer default if None.
-            count_threshold_true_to_false: Count threshold for true→false transitions.
-                                          Uses stabilizer default if None.
-            count_threshold_false_to_true: Count threshold for false→true transitions.
-                                          Uses stabilizer default if None.
-            duration_threshold_true_to_false: Duration threshold for true→false transitions.
-                                             Uses stabilizer default if None.
-            duration_threshold_false_to_true: Duration threshold for false→true transitions.
-                                             Uses stabilizer default if None.
-        
-        Returns:
-            The created BoolAttribute.
-        
-        Raises:
-            ValueError: If an attribute with the given name already exists.
+        """Create and register an attribute.
+
+        Directional arguments omitted here inherit the manager directional
+        defaults. Passing ``None`` explicitly disables that inherited directional
+        default so the attribute's symmetric threshold is used instead.
         """
         if name in self._attributes:
-            raise ValueError(f"Attribute '{name}' already exists")
+            raise ValueError("Attribute {!r} already exists".format(name))
+        initial_value = validate_bool(initial_value, "initial_value")
 
-        # Use attribute-specific values if provided, otherwise fall back to stabilizer defaults
-        resolved_count_t2f = (
-            count_threshold_true_to_false
-            if count_threshold_true_to_false is not None
-            else self._count_threshold_true_to_false
+        resolved_count = self._count_threshold if count_threshold is None else validate_count(
+            count_threshold, "count_threshold"
         )
-        resolved_count_f2t = (
-            count_threshold_false_to_true
-            if count_threshold_false_to_true is not None
-            else self._count_threshold_false_to_true
+        resolved_duration = (
+            self._duration_threshold
+            if duration_threshold is None
+            else validate_duration(duration_threshold, "duration_threshold")
         )
-        resolved_duration_t2f = (
-            duration_threshold_true_to_false
-            if duration_threshold_true_to_false is not None
-            else self._duration_threshold_true_to_false
+        assert resolved_count is not None
+        assert resolved_duration is not None
+        resolved_mode = self._buffer_mode if buffer_mode is None else validate_buffer_mode(buffer_mode)
+        resolved_clock = self._clock if clock is None else validate_clock(clock)
+
+        resolved_count_t2f = self._resolve_directional_count(
+            count_threshold_true_to_false,
+            self._count_threshold_true_to_false,
+            "count_threshold_true_to_false",
         )
-        resolved_duration_f2t = (
-            duration_threshold_false_to_true
-            if duration_threshold_false_to_true is not None
-            else self._duration_threshold_false_to_true
+        resolved_count_f2t = self._resolve_directional_count(
+            count_threshold_false_to_true,
+            self._count_threshold_false_to_true,
+            "count_threshold_false_to_true",
         )
-        
-        attr = BoolAttribute(
-            name=name,
-            initial_value=initial_value,
-            count_threshold=count_threshold if count_threshold is not None else self._count_threshold,
-            duration_threshold=duration_threshold if duration_threshold is not None else self._duration_threshold,
-            buffer_mode=buffer_mode if buffer_mode is not None else self._buffer_mode,
+        resolved_duration_t2f = self._resolve_directional_duration(
+            duration_threshold_true_to_false,
+            self._duration_threshold_true_to_false,
+            "duration_threshold_true_to_false",
+        )
+        resolved_duration_f2t = self._resolve_directional_duration(
+            duration_threshold_false_to_true,
+            self._duration_threshold_false_to_true,
+            "duration_threshold_false_to_true",
+        )
+
+        attribute = BoolAttribute(
+            name,
+            initial_value,
+            resolved_count,
+            resolved_duration,
+            resolved_mode,
             count_threshold_true_to_false=resolved_count_t2f,
             count_threshold_false_to_true=resolved_count_f2t,
             duration_threshold_true_to_false=resolved_duration_t2f,
             duration_threshold_false_to_true=resolved_duration_f2t,
+            clock=resolved_clock,
         )
-        self._attributes[name] = attr
-        return attr
-    
+        self._attributes[name] = attribute
+        return attribute
+
+    @staticmethod
+    def _resolve_directional_count(
+        value: DirectionalCount, inherited: Optional[int], parameter: str
+    ) -> Optional[int]:
+        if value is _INHERIT:
+            return inherited
+        return validate_count(value, parameter, allow_none=True)
+
+    @staticmethod
+    def _resolve_directional_duration(
+        value: DirectionalDuration, inherited: Optional[float], parameter: str
+    ) -> Optional[float]:
+        if value is _INHERIT:
+            return inherited
+        return validate_duration(value, parameter, allow_none=True)
+
     def remove_attribute(self, name: str) -> bool:
-        """
-        Remove an attribute from the stabilizer.
-        
-        Args:
-            name: The name of the attribute to remove.
-        
-        Returns:
-            True if the attribute was removed, False if it didn't exist.
-        """
         if name in self._attributes:
             del self._attributes[name]
             return True
         return False
-    
+
     def get_attribute(self, name: str) -> Optional[BoolAttribute]:
-        """
-        Get an attribute by name.
-        
-        Args:
-            name: The name of the attribute.
-        
-        Returns:
-            The BoolAttribute if found, None otherwise.
-        """
         return self._attributes.get(name)
-    
+
     def report(self, name: str, new_value: bool) -> bool:
-        """
-        Report a new value for an attribute.
-        
-        The buffering behavior depends on the attribute's buffer_mode setting:
-        - BOTH: Always apply buffering
-        - TRUE_TO_FALSE: Only buffer when transitioning from True to False
-        - FALSE_TO_TRUE: Only buffer when transitioning from False to True
-        - NONE: Never buffer (immediate changes)
-        
-        Args:
-            name: The name of the attribute to update.
-            new_value: The new boolean value being reported.
-        
-        Returns:
-            The current stabilized value after processing the report.
-        
-        Raises:
-            KeyError: If no attribute with the given name exists.
-        """
-        if name not in self._attributes:
-            raise KeyError(f"Attribute '{name}' does not exist")
-        
-        return self._attributes[name].report(new_value)
-    
+        """Report an observation and return the named stabilized value."""
+        return self._get_required(name).report(new_value)
+
+    def report_with_result(self, name: str, new_value: bool) -> TransitionResult:
+        """Report an observation and return its transition outcome."""
+        return self._get_required(name).report_with_result(new_value)
+
+    def update(self, name: str) -> bool:
+        """Evaluate pending evidence for one attribute without a new report."""
+        return self._get_required(name).update()
+
+    def update_with_result(self, name: str) -> TransitionResult:
+        """Evaluate pending evidence and return its transition outcome."""
+        return self._get_required(name).update_with_result()
+
     def get_value(self, name: str) -> bool:
-        """
-        Get the current stabilized value of an attribute.
-        
-        Args:
-            name: The name of the attribute.
-        
-        Returns:
-            The current stabilized boolean value.
-        
-        Raises:
-            KeyError: If no attribute with the given name exists.
-        """
-        if name not in self._attributes:
-            raise KeyError(f"Attribute '{name}' does not exist")
-        return self._attributes[name].value
-    
+        return self._get_required(name).value
+
+    def _get_required(self, name: str) -> BoolAttribute:
+        try:
+            return self._attributes[name]
+        except KeyError:
+            raise KeyError("Attribute {!r} does not exist".format(name)) from None
+
     def get_all_values(self) -> Dict[str, bool]:
-        """
-        Get all attribute values as a dictionary.
-        
-        Returns:
-            A dictionary mapping attribute names to their current stabilized values.
-        """
-        return {name: attr.value for name, attr in self._attributes.items()}
-    
+        return {name: attribute.value for name, attribute in self._attributes.items()}
+
     def reset_all(self) -> None:
-        """Reset all attributes' pending states without changing their values."""
-        for attr in self._attributes.values():
-            attr.reset()
-    
+        for attribute in self._attributes.values():
+            attribute.reset()
+
     def __len__(self) -> int:
-        """Return the number of attributes in the stabilizer."""
         return len(self._attributes)
-    
+
     def __contains__(self, name: str) -> bool:
-        """Check if an attribute exists."""
         return name in self._attributes
-    
+
     def __iter__(self) -> Iterator[str]:
-        """Iterate over attribute names."""
         return iter(self._attributes)
-    
+
     def __getitem__(self, name: str) -> bool:
-        """Get an attribute's value using indexing syntax."""
         return self.get_value(name)
-    
+
     def __repr__(self) -> str:
-        """Return a string representation of the stabilizer."""
         return (
-            f"BoolStabilizer(count_threshold={self._count_threshold}, "
-            f"duration_threshold={self._duration_threshold}, "
-            f"buffer_mode={self._buffer_mode}, "
-            f"attributes={list(self._attributes.keys())})"
+            "BoolStabilizer(count_threshold={}, duration_threshold={}, "
+            "buffer_mode={}, attributes={})"
+        ).format(
+            self._count_threshold,
+            self._duration_threshold,
+            self._buffer_mode,
+            list(self._attributes),
         )

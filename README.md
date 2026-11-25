@@ -1,209 +1,158 @@
 # BoolStabilizer
 
-A Python library for stabilizing boolean values based on configurable count and duration thresholds.
+`boolstabilizer` is a small, standard-library-only, stateful boolean transition filter. It separates raw observations from an accepted stabilized value. It is useful for debounce logic, noisy sensors, online/offline monitors, game transitions, and deterministic simulations.
 
-## Overview
-
-BoolStabilizer provides classes that prevent boolean values from changing until certain conditions are met.
-Thresholds can be symmetric or asymmetric:
-
-- **Count threshold**: How many consecutive reports are required before a transition is accepted  
-- **Duration threshold**: How long a new value must be continuously reported before being accepted  
-- **Asymmetric thresholds**: You may use different thresholds for true→false vs false→true transitions  
-- **Buffer mode**: Control which transitions are stabilized (true→false, false→true, or both)
-
-
-This is useful for debouncing, filtering noise from sensor data, or any scenario where you want to prevent rapid boolean state changes.
-
-## Installation
+## Install
 
 ```bash
 pip install boolstabilizer
 ```
 
-Or install from source:
+Requires Python 3.8 or newer.
 
-```bash
-git clone https://github.com/Grayjou/BoolStabilizer.git
-cd BoolStabilizer
-pip install -e .
-```
+## Core model
 
-## Quick Start
+A `BoolAttribute` has a stabilized `value` and, while evidence is accumulating, a pending candidate value, count, and start time.
 
-```python
-from boolstabilizer import BoolStabilizer, BufferMode
+- `report(value)` records a raw observation and returns the stabilized value.
+- A buffered transition is accepted only when both the count and duration thresholds are met.
+- A report equal to the stabilized value cancels pending evidence.
+- An unbuffered transition is accepted immediately.
+- Pending evidence is cleared when it is cancelled or accepted.
 
-# Create a stabilizer with default thresholds
-stabilizer = BoolStabilizer(count_threshold=3, duration_threshold=0.5)
+Duration is **report-driven** by default. It starts with the first report for a candidate; time between reports counts, but silence alone does not accept a transition. The next matching `report()` evaluates the thresholds. This does not prove the source remained in that state while no observations arrived.
 
-# Add boolean attributes (they inherit default thresholds and buffer_mode)
-stabilizer.add_attribute("sensor1", initial_value=False)
-stabilizer.add_attribute("sensor2", initial_value=True)
+`update()` is an explicit, optional evaluation operation for callers that intentionally treat the last observation as valid until replaced. It never increments the pending report count and creates no observations. There are no threads, timers, callbacks, or background work.
 
-# Report new values - the value won't change until thresholds are met
-stabilizer.report("sensor1", True)  # Count: 1/3 - still False
-stabilizer.report("sensor1", True)  # Count: 2/3 - still False
-stabilizer.report("sensor1", True)  # Count: 3/3 - now True (if duration met)
-
-# Get the current stabilized value
-print(stabilizer.get_value("sensor1"))
-```
-
-## Asymmetric Thresholds
-
-BoolStabilizer supports asymmetric stabilization:
-you can specify different thresholds for **true→false** and **false→true** transitions.
-
-If a per-direction threshold is not provided, it falls back to the base
-`count_threshold` or `duration_threshold`.
-
-### Example
+## Deterministic quick start
 
 ```python
-from boolstabilizer import BoolStabilizer
+from boolstabilizer import BoolAttribute
 
-# Quick to turn on, slow to turn off
-stabilizer = BoolStabilizer(
-    count_threshold_false_to_true=2,
-    count_threshold_true_to_false=5,
-)
 
-stabilizer.add_attribute("sensor", initial_value=False)
+class ManualClock:
+    def __init__(self):
+        self.now = 0.0
 
-# Turns True after 2 reports
-stabilizer.report("sensor", True)
-stabilizer.report("sensor", True)
-assert stabilizer.get_value("sensor") == True
+    def __call__(self):
+        return self.now
 
-# Turns False after 5 reports
-for _ in range(5):
-    stabilizer.report("sensor", False)
-assert stabilizer.get_value("sensor") == False
+
+clock = ManualClock()
+sensor = BoolAttribute("door", count_threshold=2, duration_threshold=5, clock=clock)
+
+assert sensor.report(True) is False       # Pending: 1 report, 0 seconds
+clock.now = 5
+assert sensor.report(True) is True        # 2 reports AND 5 seconds
+assert sensor.value is True
 ```
 
-## Buffer Modes
+The default clock is `time.monotonic()`. A custom clock must return finite numeric seconds. If it moves backwards, the value used for an operation is clamped to the last operation time, so elapsed pending duration cannot move backwards or become negative. Inspection does not update this clamp.
 
-Each attribute can have its own buffer mode, controlling when stabilization is applied:
+## Stream-monitoring example
 
-```python
-from boolstabilizer import BoolStabilizer, BoolAttribute, BufferMode
-
-# Create a stabilizer with a default buffer mode
-stabilizer = BoolStabilizer(count_threshold=3, buffer_mode=BufferMode.BOTH)
-
-# Add attributes with different buffer modes
-stabilizer.add_attribute("sensor1", buffer_mode=BufferMode.BOTH)        # Buffer both directions
-stabilizer.add_attribute("sensor2", buffer_mode=BufferMode.TRUE_TO_FALSE)  # Only buffer True→False
-stabilizer.add_attribute("sensor3", buffer_mode=BufferMode.FALSE_TO_TRUE)  # Only buffer False→True
-stabilizer.add_attribute("sensor4", buffer_mode=BufferMode.NONE)        # No buffering (immediate)
-
-# Or use BoolAttribute directly with a specific buffer mode
-attr = BoolAttribute("my_bool", count_threshold=3, buffer_mode=BufferMode.TRUE_TO_FALSE)
-
-# Change buffer mode at runtime
-attr.buffer_mode = BufferMode.NONE
-```
-
-### Buffer Mode Options
-
-| Mode | Description |
-|------|-------------|
-| `BufferMode.BOTH` | Buffer both true→false and false→true transitions (default) |
-| `BufferMode.TRUE_TO_FALSE` | Only buffer when changing from True to False |
-| `BufferMode.FALSE_TO_TRUE` | Only buffer when changing from False to True |
-| `BufferMode.NONE` | No buffering - all changes are immediate |
-
-## BoolAttribute Class
-
-`BoolAttribute` supports both symmetric and asymmetric thresholds.
-
-You may specify:
-
-- `count_threshold` / `duration_threshold` (symmetric)
-- `count_threshold_true_to_false`
-- `count_threshold_false_to_true`
-- `duration_threshold_true_to_false`
-- `duration_threshold_false_to_true`
-
-If a per-direction threshold is omitted, the symmetric threshold is used.
-
-### Example
+For a Twitch-like stream, turn online immediately but require an offline observation to persist for 60 seconds. A recovered stream cancels the pending offline transition, so it does not produce a duplicate online notification.
 
 ```python
 from boolstabilizer import BoolAttribute, BufferMode
 
-attr = BoolAttribute(
-    name="my_bool",
-    initial_value=False,
-    count_threshold=3,
-    count_threshold_false_to_true=1,   # faster to turn on
-    count_threshold_true_to_false=5,   # slower to turn off
-    duration_threshold=0.5,
-    buffer_mode=BufferMode.BOTH
+stream = BoolAttribute(
+    "stream",
+    buffer_mode=BufferMode.TRUE_TO_FALSE,
+    duration_threshold_true_to_false=60,
 )
 
-attr.report(True)
-print(attr.pending_count)
-print(attr.pending_duration)
-print(attr.buffer_mode)
-
-# Update buffer mode dynamically
-attr.buffer_mode = BufferMode.NONE
-attr.report(True)  # immediate
-
+result = stream.report_with_result(is_online)
+if result.rose:
+    notify_stream_online()
 ```
 
-## API Reference
+`report_with_result()` returns immutable `TransitionResult` data with `previous_value`, `value`, `changed`, `rose`, and `fell`. A transition indication is true exactly once: on the operation that accepts it. `BoolStabilizer.report_with_result(name, value)` provides the same API for managed attributes.
 
-### BoolStabilizer
+## Thresholds and buffer modes
 
-| Method | Description |
-|--------|-------------|
-| `add_attribute(name, initial_value, ..., count_threshold_false_to_true, count_threshold_true_to_false, duration_threshold_false_to_true, duration_threshold_true_to_false)` | Add a new boolean attribute |
-| `remove_attribute(name)` | Remove an attribute |
-| `get_attribute(name)` | Get the BoolAttribute |
-| `report(name, new_value)` | Report a new value |
-| `get_value(name)` | Current stabilized value |
-| `get_all_values()` | Dictionary of all values |
-| `reset_all()` | Reset all attributes |
+Base thresholds are symmetric:
 
-#### Default Threshold Properties
+- `count_threshold`: integer at least `1`.
+- `duration_threshold`: finite, nonnegative seconds.
 
-The following defaults apply to newly added attributes:
+Directional overrides can be supplied for `true_to_false` and `false_to_true`. A directional override of `None` falls back to the base threshold. `count_threshold` and `duration_threshold` always expose their configured base values, even when directional overrides differ. Use `get_effective_thresholds(from_value, to_value)` to inspect the resolved requirements for a direction.
 
-| Property | Description |
-|----------|-------------|
-| `count_threshold` | Symmetric count threshold |
-| `duration_threshold` | Symmetric duration threshold |
-| `count_threshold_false_to_true` | Per-direction threshold (optional) |
-| `count_threshold_true_to_false` | Per-direction threshold (optional) |
-| `duration_threshold_false_to_true` | Per-direction threshold (optional) |
-| `duration_threshold_true_to_false` | Per-direction threshold (optional) |
-| `buffer_mode` | Default buffer mode |
+```python
+attribute = BoolAttribute(
+    "connection",
+    count_threshold=3,
+    duration_threshold=0,
+    count_threshold_false_to_true=1,
+    count_threshold_true_to_false=5,
+)
 
-### BoolAttribute
+assert attribute.count_threshold == 3
+assert attribute.get_effective_thresholds(False, True).count_threshold == 1
+assert attribute.get_effective_thresholds(True, False).count_threshold == 5
+```
 
-| Property | Description |
-|----------|-------------|
-| `name` | Attribute name |
-| `value` | Current stabilized value |
-| `pending_value` | Pending transition value |
-| `pending_count` | Count of repeated reports |
-| `pending_duration` | Duration in seconds of consistent reports |
-| `count_threshold` | Symmetric count threshold |
-| `duration_threshold` | Symmetric duration threshold |
-| `count_threshold_false_to_true` | Optional per-direction threshold |
-| `count_threshold_true_to_false` | Optional per-direction threshold |
-| `duration_threshold_false_to_true` | Optional per-direction duration |
-| `duration_threshold_true_to_false` | Optional per-direction duration |
-| `buffer_mode` | Buffer mode (can be changed dynamically) |
+`BufferMode.BOTH` buffers both directions. `TRUE_TO_FALSE` buffers only outages, `FALSE_TO_TRUE` buffers only recoveries, and `NONE` accepts every change immediately. Setting a different `buffer_mode` clears pending evidence but preserves the stabilized value; assigning the existing mode does not clear it.
 
-| Method | Description |
-|--------|-------------|
-| `report(value)` | Report a new boolean value |
-| `reset(new_value=None)` | Reset pending state (and optionally force value) |
+## Manager defaults and inheritance
+
+`BoolStabilizer` supplies defaults when `add_attribute()` creates an attribute. Attributes are independent after creation; later manager changes affect only future attributes.
+
+For each direction, precedence is:
+
+1. An explicit attribute directional override.
+2. A manager directional default when the attribute directional argument is omitted.
+3. The attribute symmetric threshold.
+4. The manager symmetric default.
+
+Passing `None` explicitly to a directional argument of `add_attribute()` disables a manager directional default for that direction and uses the attribute base threshold. Omitting the argument inherits the manager directional default. This distinction permits an attribute to opt out without adding another public option.
+
+The manager clock is inherited by new attributes unless `clock=` is passed to `add_attribute()`.
+
+## Pending inspection and progress
+
+`pending_value`, `pending_count`, and `pending_duration` remain available. `pending_transition` returns an immutable `PendingTransition` snapshot with effective thresholds, satisfaction flags, and progress.
+
+For an active pending transition, count progress is `min(1, pending_count / count_threshold)` and duration progress is `min(1, pending_duration / duration_threshold)`. A zero duration threshold has duration progress `1`. Overall progress is the smaller component because both requirements are required. Progress is zero with no pending transition. Progress of one means the requirements are satisfied; in report-driven use it does not mean the transition has been committed until a report or explicit `update()` performs evaluation.
+
+Inspection never commits a transition or changes pending evidence.
+
+## API
+
+```python
+from boolstabilizer import (
+    BoolAttribute,
+    BoolStabilizer,
+    BufferMode,
+    EffectiveThresholds,
+    PendingTransition,
+    TransitionResult,
+)
+```
+
+- `BoolAttribute.report(value)` and `BoolStabilizer.report(name, value)` return the stabilized boolean for compatibility.
+- `report_with_result(...)` provides transition observability.
+- `update()` / `update_with_result()` evaluate existing pending evidence without a report.
+- `reset(new_value=None)` clears pending evidence and can explicitly set a boolean stabilized value.
+- `BoolStabilizer.reset_all()` clears pending evidence for all attributes.
+
+Inputs are strict: initial values, reports, and explicit reset values must be actual `bool` instances. Thresholds reject booleans, fractional counts, negatives, NaN, and infinity. Buffer modes must be `BufferMode` members.
+
+## Thread safety
+
+Instances are not thread-safe. Serialize access to an attribute or manager when multiple threads may report or reset the same state.
+
+## Migration from 0.1
+
+- `BoolAttribute.count_threshold` and `duration_threshold` no longer raise when directional thresholds differ; they always return the configured base threshold. Use `get_effective_thresholds()` for direction-specific values.
+- The default timing source changed from wall-clock time to `time.monotonic()`.
+- Inputs that were previously accepted incidentally, such as `1` for a report or `True` for a count threshold, now raise `TypeError`.
+- In `BoolStabilizer.add_attribute()`, an explicitly passed directional `None` now opts out of a manager directional default. Omit the argument to retain the previous inheritance behavior.
+
+## Deliberately deferred
+
+Maximum report-gap expiry, mutable thresholds, and additional stabilization strategies are intentionally not included. They introduce evidence-expiration and reconfiguration semantics that overlap with the small report-driven model. Callers needing time-driven commitment can use `update()` explicitly; callers needing freshness can track observation timestamps separately.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).

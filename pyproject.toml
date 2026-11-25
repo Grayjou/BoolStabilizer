@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boolstabilizer"
-version = "0.1.0"
+version = "0.2.0"
 description = "A class that stabilizes booleans for a determined amount of time and/or checks"
 readme = "README.md"
 license = {text = "MIT"}
@@ -36,6 +36,9 @@ keywords = ["boolean", "stabilizer", "debounce", "filter"]
 where = ["."]
 include = ["boolstabilizer*"]
 
+[tool.setuptools.package-data]
+boolstabilizer = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -43,7 +46,9 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 [tool.mypy]
-python_version = "3.8"
+# Current mypy releases no longer accept a 3.8 target. Runtime tests still
+# execute on the package's declared 3.8 minimum in CI.
+python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
