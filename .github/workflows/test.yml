@@ -6,15 +6,46 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Ubuntu 22.04 retains setup-python support for the declared 3.8 minimum.
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python -m pip install --upgrade pip "pytest<9"
+      - name: Install test dependencies
+        run: |
+          if [ "${{ matrix.python-version }}" = "3.8" ]; then
+            python -m pip install --upgrade "pip<25.1"
+          else
+            python -m pip install --upgrade pip
+          fi
+          python -m pip install "pytest<9"
       - run: python -m pytest -q
+
+  typecheck:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip mypy
+      - run: python -m mypy boolstabilizer
+
+  package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build
+      - run: python -m venv package-test-env
+      - run: package-test-env/bin/python -m pip install dist/*.whl
+      - run: package-test-env/bin/python -c "from importlib import resources; import boolstabilizer; assert resources.files('boolstabilizer').joinpath('py.typed').is_file()"

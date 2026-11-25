@@ -2,6 +2,7 @@
 
 import math
 import unittest
+from dataclasses import FrozenInstanceError
 
 from boolstabilizer import BoolAttribute, BufferMode
 
@@ -64,6 +65,50 @@ class TestValidation(unittest.TestCase):
 
 
 class TestReportSemantics(unittest.TestCase):
+    def test_all_buffer_modes_apply_in_both_directions_as_configured(self):
+        cases = (
+            (BufferMode.BOTH, False, True, True),
+            (BufferMode.BOTH, True, False, True),
+            (BufferMode.TRUE_TO_FALSE, False, True, False),
+            (BufferMode.TRUE_TO_FALSE, True, False, True),
+            (BufferMode.FALSE_TO_TRUE, False, True, True),
+            (BufferMode.FALSE_TO_TRUE, True, False, False),
+            (BufferMode.NONE, False, True, False),
+            (BufferMode.NONE, True, False, False),
+        )
+        for mode, initial, reported, buffered in cases:
+            with self.subTest(mode=mode, initial=initial, reported=reported):
+                attr = BoolAttribute("a", initial, count_threshold=2, buffer_mode=mode)
+                first = attr.report_with_result(reported)
+                self.assertEqual(first.changed, not buffered)
+                self.assertEqual(attr.value, reported if not buffered else initial)
+                if buffered:
+                    second = attr.report_with_result(reported)
+                    self.assertTrue(second.changed)
+                    self.assertEqual(attr.value, reported)
+
+    def test_asymmetric_count_and_duration_thresholds_apply_per_direction(self):
+        clock = ManualClock()
+        attr = BoolAttribute(
+            "a",
+            count_threshold=9,
+            duration_threshold=9,
+            count_threshold_false_to_true=2,
+            duration_threshold_false_to_true=2,
+            count_threshold_true_to_false=3,
+            duration_threshold_true_to_false=4,
+            clock=clock,
+        )
+        self.assertFalse(attr.report(True))
+        clock.advance(2)
+        self.assertTrue(attr.report(True))
+        clock.advance(1)
+        self.assertTrue(attr.report(False))
+        clock.advance(3)
+        self.assertTrue(attr.report(False))
+        clock.advance(1)
+        self.assertFalse(attr.report(False))
+
     def test_count_and_duration_are_both_required_at_exact_boundaries(self):
         clock = ManualClock()
         attr = BoolAttribute("a", count_threshold=2, duration_threshold=5, clock=clock)
@@ -93,6 +138,23 @@ class TestReportSemantics(unittest.TestCase):
         self.assertEqual(attr.pending_count, 1)
         attr.report(True)
         self.assertTrue(attr.value)
+
+    def test_update_with_result_commits_once_and_reports_both_edges(self):
+        clock = ManualClock()
+        attr = BoolAttribute("a", duration_threshold=5, clock=clock)
+        attr.report(True)
+        clock.advance(5)
+        rose = attr.update_with_result()
+        repeated = attr.update_with_result()
+        self.assertEqual((rose.changed, rose.rose, rose.fell), (True, True, False))
+        self.assertEqual((repeated.changed, repeated.rose, repeated.fell), (False, False, False))
+
+        attr.report(False)
+        clock.advance(5)
+        fell = attr.update_with_result()
+        repeated = attr.update_with_result()
+        self.assertEqual((fell.changed, fell.rose, fell.fell), (True, False, True))
+        self.assertEqual((repeated.changed, repeated.rose, repeated.fell), (False, False, False))
 
     def test_matching_stabilized_report_cancels_pending_evidence(self):
         clock = ManualClock()
@@ -142,6 +204,15 @@ class TestReportSemantics(unittest.TestCase):
         clock.now = 13
         self.assertTrue(attr.report(True))
 
+    def test_reset_retains_clock_clamp_for_later_pending_evidence(self):
+        clock = ManualClock(10)
+        attr = BoolAttribute("a", duration_threshold=2, clock=clock)
+        attr.report(True)
+        attr.reset()
+        clock.now = 1
+        attr.report(True)
+        self.assertEqual(attr.pending_duration, 0)
+
 
 class TestConfigurationAndInspection(unittest.TestCase):
     def test_symmetric_properties_remain_configured_base_with_overrides(self):
@@ -173,6 +244,31 @@ class TestConfigurationAndInspection(unittest.TestCase):
         self.assertEqual(snapshot.progress, 0.25)
         self.assertEqual(attr.pending_count, 1)
         self.assertFalse(snapshot.eligible)
+
+    def test_snapshot_is_immutable_independent_and_never_commits(self):
+        clock = ManualClock()
+        attr = BoolAttribute("a", duration_threshold=5, clock=clock)
+        attr.report(True)
+        clock.advance(5)
+        snapshot = attr.pending_transition
+        self.assertTrue(snapshot.eligible)
+        self.assertFalse(attr.value)
+        with self.assertRaises(FrozenInstanceError):
+            snapshot.pending_count = 2
+        committed = attr.report_with_result(True)
+        self.assertTrue(committed.rose)
+        self.assertEqual((snapshot.pending_value, snapshot.pending_count, snapshot.pending_duration), (True, 1, 5))
+
+    def test_future_inspection_does_not_advance_the_operation_clock_clamp(self):
+        clock = ManualClock()
+        attr = BoolAttribute("a", duration_threshold=10, clock=clock)
+        attr.report(True)
+        clock.now = 10
+        self.assertTrue(attr.pending_transition.eligible)
+        self.assertFalse(attr.value)
+        clock.now = 2
+        self.assertFalse(attr.report(True))
+        self.assertEqual(attr.pending_duration, 2)
 
     def test_mode_change_clears_pending_only_when_changed(self):
         attr = BoolAttribute("a", count_threshold=3)

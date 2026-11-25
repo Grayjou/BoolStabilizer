@@ -1,7 +1,7 @@
 """Container for BoolAttribute instances sharing configuration defaults."""
 
 import time
-from typing import Callable, Dict, Iterator, Optional, Union
+from typing import Callable, Dict, Final, Iterator, Optional, Union
 
 from ._validation import (
     validate_bool,
@@ -14,9 +14,15 @@ from .bool_attribute import BoolAttribute
 from .bool_attribute_types import BufferMode, TransitionResult
 
 
-_INHERIT = object()
-DirectionalCount = Union[Optional[int], object]
-DirectionalDuration = Union[Optional[float], object]
+class _InheritanceSentinel:
+    """Private marker that distinguishes omission from an explicit None."""
+
+    __slots__ = ()
+
+
+_INHERIT: Final = _InheritanceSentinel()
+DirectionalCount = Union[Optional[int], _InheritanceSentinel]
+DirectionalDuration = Union[Optional[float], _InheritanceSentinel]
 
 
 class BoolStabilizer:

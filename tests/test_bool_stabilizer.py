@@ -69,6 +69,23 @@ class TestManagerValidationAndInheritance(unittest.TestCase):
 
 
 class TestManagerOperations(unittest.TestCase):
+    def test_registration_removal_and_container_operations(self):
+        stabilizer = BoolStabilizer()
+        first = stabilizer.add_attribute("first", initial_value=True)
+        stabilizer.add_attribute("second")
+        self.assertIs(stabilizer.get_attribute("first"), first)
+        self.assertIsNone(stabilizer.get_attribute("missing"))
+        self.assertEqual(stabilizer["first"], True)
+        self.assertEqual(stabilizer.get_all_values(), {"first": True, "second": False})
+        self.assertEqual(set(stabilizer), {"first", "second"})
+        self.assertEqual(len(stabilizer), 2)
+        self.assertIn("first", stabilizer)
+        self.assertNotIn("missing", stabilizer)
+        self.assertTrue(stabilizer.remove_attribute("first"))
+        self.assertFalse(stabilizer.remove_attribute("first"))
+        with self.assertRaises(ValueError):
+            stabilizer.add_attribute("second")
+
     def test_result_and_update_are_available_through_manager(self):
         clock = ManualClock()
         stabilizer = BoolStabilizer(count_threshold=2, duration_threshold=5, clock=clock)

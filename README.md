@@ -47,7 +47,7 @@ assert sensor.report(True) is True        # 2 reports AND 5 seconds
 assert sensor.value is True
 ```
 
-The default clock is `time.monotonic()`. A custom clock must return finite numeric seconds. If it moves backwards, the value used for an operation is clamped to the last operation time, so elapsed pending duration cannot move backwards or become negative. Inspection does not update this clamp.
+The default clock is `time.monotonic()`. A custom clock must return finite numeric seconds. Report and update operations clamp a backward value to the last operation time, so they cannot create negative elapsed duration. Inspection samples the clock but never updates that clamp or commits a transition. Consequently, a non-monotonic custom clock can make a later inspection show less elapsed duration than an earlier future-valued inspection. `reset()` clears pending evidence but intentionally retains the clock clamp for the lifetime of the attribute.
 
 ## Stream-monitoring example
 
@@ -135,6 +135,18 @@ from boolstabilizer import (
 - `update()` / `update_with_result()` evaluate existing pending evidence without a report.
 - `reset(new_value=None)` clears pending evidence and can explicitly set a boolean stabilized value.
 - `BoolStabilizer.reset_all()` clears pending evidence for all attributes.
+
+### Manager operations
+
+| Method or operation | Result |
+| --- | --- |
+| `add_attribute(name, ...)` | Register and return a `BoolAttribute`; duplicate names raise `ValueError`. |
+| `remove_attribute(name)` | Remove an attribute and return whether it existed. |
+| `get_attribute(name)` | Return the attribute or `None`. |
+| `get_value(name)` / `stabilizer[name]` | Return a stabilized value; missing names raise `KeyError`. |
+| `get_all_values()` | Return a name-to-stabilized-value dictionary. |
+| `reset_all()` | Clear pending evidence without changing stabilized values. |
+| `name in stabilizer`, `len(stabilizer)`, `iter(stabilizer)` | Test membership, count attributes, and iterate names. |
 
 Inputs are strict: initial values, reports, and explicit reset values must be actual `bool` instances. Thresholds reject booleans, fractional counts, negatives, NaN, and infinity. Buffer modes must be `BufferMode` members.
 
